@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ocean Hazard Information Validator</title>
+    <script src="https://cdn/tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen">
+    <div class="w-full max-w-2xl bg-white rounded-xl shadow-lg p-8 m-4">
+        <div class="text-center mb-8">
+            <h1 class="text-3xl font-bold text-gray-800">Ocean Hazard Information Validator</h1>
+            <p class="text-gray-500 mt-2">Enter a caption from your data to check if it describes a valid ocean hazard.</p>
+        </div>
+
+        <div>
+            <label for="caption-input" class="block text-sm font-medium text-gray-700 mb-2">Caption Text:</label>
+            <textarea id="caption-input" rows="5" class="w-full p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition" placeholder="e.g., 'A tsunami warning has been issued after a strong earthquake off the coast.' or 'Sailors enjoying calm seas.'"></textarea>
+        </div>
+
+        <div class="mt-6 text-center">
+            <button id="analyze-button" class="bg-blue-600 text-white font-bold py-3 px-8 rounded-lg hover:bg-blue-700 focus:outline-none focus:ring-4 focus:ring-blue-300 transition-transform transform hover:scale-105 duration-200 ease-in-out">
+                Analyze Caption
+            </button>
+        </div>
+
+        <div id="loader" class="hidden mt-6 flex justify-center">
+            <div class="loader"></div>
+        </div>
+        
+        <div id="error-message" class="hidden mt-6 p-4 bg-red-100 text-red-700 border border-red-300 rounded-lg">
+            <p><span class="font-bold">Error:</span> <span id="error-text"></span></p>
+        </div>
+
+        <div id="result-container" class="hidden mt-8 border-t pt-6">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4">Analysis Result:</h2>
+            <div id="result-card" class="p-5 rounded-lg">
+                <div class="flex items-center">
+                    <div id="result-icon" class="mr-3"></div>
+                    <p class="text-lg font-bold" id="result-status"></p>
+                </div>
+                <div class="mt-4 pl-10">
+                    <p class="text-gray-700"><strong class="font-medium">Hazard Type:</strong> <span id="hazard-type"></span></p>
+                    <p class="text-gray-600 mt-2"><strong class="font-medium">Reasoning:</strong> <span id="result-reason"></span></p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const analyzeButton = document.getElementById('analyze-button');
+        const captionInput = document.getElementById('caption-input');
+        const loader = document.getElementById('loader');
+        const resultContainer = document.getElementById('result-container');
+        const resultCard = document.getElementById('result-card');
+        const resultStatus = document.getElementById('result-status');
+        const resultReason = document.getElementById('result-reason');
+        const hazardType = document.getElementById('hazard-type');
+        const resultIcon = document.getElementById('result-icon');
+        const errorMessage = document.getElementById('error-message');
+        const errorText = document.getElementById('error-text');
+
+        analyzeButton.addEventListener('click', analyzeCaption);
+
+        async function analyzeCaption() {
+            const caption = captionInput.value.trim();
+            if (!caption) {
+                showError('Please enter a caption to analyze.');
+                return;
+            }
+
+            // Reset UI
+            loader.classList.remove('hidden');
+            resultContainer.classList.add('hidden');
+            errorMessage.classList.add('hidden');
+            analyzeButton.disabled = true;
+            analyzeButton.classList.add('opacity-50', 'cursor-not-allowed');
+
+            try {
+                const systemPrompt = `You are an expert in oceanography and marine safety. Your task is to analyze text captions and determine if they describe an ocean-related hazard. Ocean hazards include events like tsunamis, cyclones, hurricanes, typhoons, storm surges, harmful algal blooms, oil spills, rip currents, and rogue waves. Exclude non-oceanic events like inland floods or earthquakes unless they directly cause an ocean hazard like a tsunami. Respond only with the specified JSON schema. If the text does not describe an ocean hazard, set 'is_hazard' to false and 'hazard_type' to 'None'.`;
+                
+                const payload = {
+                    contents: [{ parts: [{ text: caption }] }],
+                    systemInstruction: { parts: [{ text: systemPrompt }] },
+                    generationConfig: {
+                        responseMimeType: "application/json",
+                        responseSchema: {
+                            type: "OBJECT",
+                            properties: {
+                                is_hazard: { type: "BOOLEAN", description: "Is the caption describing a natural hazard?" },
+                                hazard_type: { type: "STRING", description: "Type of hazard (e.g., Landslide, Flood, None)." },
+                                reason: { type: "STRING", description: "A brief explanation for the decision." }
+                            },
+                            required: ["is_hazard", "hazard_type", "reason"]
+                        }
+                    }
+                };
+                const apiKey = "AIzaSyD7Rq8JDjBpJz3u1lmIy0ut2qLKotpDUc4";
+                const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-05-20:generateContent?key=${apiKey}`;
+
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error?.message || `HTTP error! status: ${response.status}`);
+                }
+
+                const result = await response.json();
+                
+                const candidate = result.candidates?.[0];
+                if (candidate && candidate.content?.parts?.[0]?.text) {
+                    const analysis = JSON.parse(candidate.content.parts[0].text);
+                    displayResult(analysis);
+                } else {
+                    throw new Error("Invalid response structure from the API.");
+                }
+
+            } catch (error) {
+                console.error("API call failed:", error);
+                showError(error.message);
+            } finally {
+                loader.classList.add('hidden');
+                analyzeButton.disabled = false;
+                analyzeButton.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        }
+
+        function displayResult(analysis) {
+            resultContainer.classList.remove('hidden');
+            
+            resultReason.textContent = analysis.reason;
+            hazardType.textContent = analysis.hazard_type;
+
+            if (analysis.is_hazard) {
+                resultStatus.textContent = "Valid Hazard Information";
+                resultCard.className = 'p-5 rounded-lg bg-green-100 text-green-800 border border-green-200';
+                resultIcon.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-green-600" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" /></svg>`;
+            } else {
+                resultStatus.textContent = "Not a Natural Hazard";
+                resultCard.className = 'p-5 rounded-lg bg-red-100 text-red-800 border border-red-200';
+                 resultIcon.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-red-600" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg>`;
+            }
+        }
+        
+        function showError(message) {
+            errorMessage.classList.remove('hidden');
+            errorText.textContent = message;
+        }
+
+    </script>
+</body>
+</html>
+
